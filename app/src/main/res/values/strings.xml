@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">DayFlow</string>
+    <string name="widget_description">Today\'s progress, tasks and habits</string>
+</resources>
