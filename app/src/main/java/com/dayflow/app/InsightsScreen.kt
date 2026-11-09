@@ -146,6 +146,39 @@ fun InsightsScreen() {
                 }
             }
         }
+        if (habits.isNotEmpty()) {
+            val best = habits.sortedByDescending { it.currentStreak() }.take(3)
+            item {
+                DfCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("🔥 Top streaks", fontWeight = FontWeight.SemiBold)
+                        for (h in best) {
+                            Row {
+                                Text(h.icon + " " + h.name, modifier = Modifier.weight(1f), fontSize = 14.sp)
+                                Text("${h.currentStreak()} days", fontSize = 13.sp, color = muted)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        val recent = Store.reviews.sortedByDescending { it.date }.take(3)
+        if (recent.isNotEmpty()) {
+            item {
+                DfCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("🌙 Recent evening reviews", fontWeight = FontWeight.SemiBold)
+                        for (r in recent) {
+                            Column {
+                                Text(Moods[r.mood.coerceIn(0, 4)] + "  " + dueLabel(r.date), fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                if (r.wins.isNotBlank()) Text("Went well: " + r.wins, fontSize = 12.sp, color = muted)
+                                if (r.blockers.isNotBlank()) Text("In the way: " + r.blockers, fontSize = 12.sp, color = muted)
+                            }
+                        }
+                    }
+                }
+            }
+        }
         item { Text("Suggestions", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(start = 4.dp)) }
         if (recs.isEmpty()) {
             item { EmptyState("✨", "No suggestions right now. Everything looks balanced.") }

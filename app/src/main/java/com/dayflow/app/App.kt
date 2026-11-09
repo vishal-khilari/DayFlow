@@ -33,7 +33,8 @@ data class EditorRequest(val task: Task?, val parentId: String?)
 
 @Composable
 fun DayFlowApp(launchAction: String?, onLaunchHandled: () -> Unit) {
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by remember { mutableIntStateOf(Store.prefs.startTab.coerceIn(0, 4)) }
+    var showReview by remember { mutableStateOf(false) }
     var overlay by remember { mutableStateOf<String?>(null) }
     var focusTask by remember { mutableStateOf<Task?>(null) }
     var editor by remember { mutableStateOf<EditorRequest?>(null) }
@@ -43,6 +44,9 @@ fun DayFlowApp(launchAction: String?, onLaunchHandled: () -> Unit) {
     LaunchedEffect(launchAction) {
         if (launchAction == "quickAdd") editor = EditorRequest(null, null)
         if (launchAction == "focus") overlay = "focus"
+        if (launchAction == "habits") tab = 3
+        if (launchAction == "calendar") tab = 1
+        if (launchAction == "review") showReview = true
         if (launchAction != null) onLaunchHandled()
     }
 
@@ -114,6 +118,7 @@ fun DayFlowApp(launchAction: String?, onLaunchHandled: () -> Unit) {
                                 overlay = "focus"
                             },
                             onSettings = { overlay = "settings" },
+                            onReview = { showReview = true },
                             onTab = { tab = it }
                         )
                         1 -> AgendaScreen(actions)
@@ -158,6 +163,10 @@ fun DayFlowApp(launchAction: String?, onLaunchHandled: () -> Unit) {
             },
             dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } }
         )
+    }
+
+    if (showReview) {
+        ReviewDialog(onClose = { showReview = false })
     }
 
     val ed = editor

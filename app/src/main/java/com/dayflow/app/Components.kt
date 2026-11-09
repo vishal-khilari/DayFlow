@@ -134,7 +134,7 @@ fun CheckCircle(checked: Boolean, color: Color, onClick: () -> Unit) {
             .background(fill)
             .border(2.dp, if (checked) GreenC else color, CircleShape)
             .clickable {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                if (Store.prefs.haptics) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 onClick()
             },
         contentAlignment = Alignment.Center
@@ -146,10 +146,17 @@ fun CheckCircle(checked: Boolean, color: Color, onClick: () -> Unit) {
 }
 
 @Composable
-fun ProgressRing(progress: Float, dia: Dp, label: String) {
+fun ProgressRing(
+    progress: Float,
+    dia: Dp,
+    label: String,
+    fillColor: Color = MaterialTheme.colorScheme.primary,
+    trackColor: Color = MaterialTheme.colorScheme.surfaceVariant,
+    textColor: Color = Color.Unspecified
+) {
     val anim by animateFloatAsState(targetValue = progress.coerceIn(0f, 1f), animationSpec = tween(700), label = "ring")
-    val track = MaterialTheme.colorScheme.surfaceVariant
-    val color = MaterialTheme.colorScheme.primary
+    val track = trackColor
+    val color = fillColor
     Box(modifier = Modifier.size(dia), contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val stroke = 10.dp.toPx()
@@ -166,7 +173,7 @@ fun ProgressRing(progress: Float, dia: Dp, label: String) {
                 )
             }
         }
-        Text(label, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        Text(label, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = textColor)
     }
 }
 
@@ -225,13 +232,13 @@ fun MetaRow(task: Task) {
             Pill(dueLabel(d), if (task.isOverdue()) RedC else if (d == td) BlueC else GreyC)
         }
         if (tm != null) {
-            Pill(if (task.durationMin > 0) tm + " · " + fmtMin(task.durationMin) else tm, BlueC)
+            Pill(if (task.durationMin > 0) fmtHHmm(tm) + " · " + fmtMin(task.durationMin) else fmtHHmm(tm), BlueC)
         } else if (task.durationMin > 0) {
             Pill(fmtMin(task.durationMin), GreyC)
         }
         if (task.category.isNotBlank()) Pill(task.category, GreyC)
         if (task.priority >= 2) Pill(PriorityNames[task.priority], priorityColor(task.priority))
-        if (task.remind) Pill("🔔", GreyC)
+        if (task.remind) Pill("🔔 " + remindLabel(task), GreyC)
     }
 }
 
@@ -248,7 +255,7 @@ fun TaskLine(task: Task, actions: TaskActions, extra: String? = null) {
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f).clickable { actions.edit(task) }) {
                 Text(
-                    task.title,
+                    titleWithEmoji(task),
                     fontWeight = FontWeight.Medium,
                     textDecoration = if (done) TextDecoration.LineThrough else null,
                     color = if (done) muted else Color.Unspecified,
@@ -287,4 +294,29 @@ fun HabitControl(h: Habit, date: LocalDate) {
             androidx.compose.material3.TextButton(onClick = { Store.setHabitEntry(h.id, ds, v + 1) }) { Text("+", fontSize = 18.sp) }
         }
     }
+}
+
+
+fun titleWithEmoji(t: Task): String {
+    val e = categoryEmoji(t.category)
+    return if (e.isEmpty()) t.title else e + " " + t.title
+}
+
+fun remindLabel(t: Task): String {
+    if (t.remindAt <= 0L) return "reminder"
+    val dt = java.time.Instant.ofEpochMilli(t.remindAt).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime()
+    val d = dt.toLocalDate()
+    val prefix = if (d == LocalDate.now()) "" else dueLabel(d.toString()) + " "
+    return prefix + fmtClock(dt.hour * 60 + dt.minute)
+}
+
+fun showDatePicker(ctx: android.content.Context, current: LocalDate?, onPicked: (LocalDate) -> Unit) {
+    val d = current ?: LocalDate.now()
+    android.app.DatePickerDialog(ctx, { _, y, m, day -> onPicked(LocalDate.of(y, m + 1, day)) }, d.year, d.monthValue - 1, d.dayOfMonth).show()
+}
+
+/** [current] and the result are 24h "HH:mm" strings. The dialog shows AM/PM unless 24-hour time is chosen in Settings. */
+fun showTimePicker(ctx: android.content.Context, current: String?, onPicked: (String) -> Unit) {
+    val t = parseTime(current)
+    android.app.TimePickerDialog(ctx, { _, h, m -> onPicked("%02d:%02d".format(h, m)) }, t.hour, t.minute, Store.prefs.use24h).show()
 }

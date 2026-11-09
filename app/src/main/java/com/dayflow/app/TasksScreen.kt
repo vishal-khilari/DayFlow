@@ -48,7 +48,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val FilterNames = listOf("Inbox", "Today", "Upcoming", "All", "Done")
+private val FilterNames = listOf("📥 Inbox", "Today", "Upcoming", "All", "Done")
 private val SortNames = listOf("Manual", "Due date", "Priority", "A–Z")
 
 fun sortTasks(list: List<Task>, sort: Int): List<Task> = when (sort) {
@@ -87,6 +87,7 @@ fun TasksScreen(actions: TaskActions) {
     var filter by remember { mutableIntStateOf(1) }
     var sort by remember { mutableIntStateOf(0) }
     var query by remember { mutableStateOf("") }
+    var tplMenu by remember { mutableStateOf(false) }
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
     val tasks = Store.tasks
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
@@ -105,7 +106,23 @@ fun TasksScreen(actions: TaskActions) {
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ScreenHeader("Tasks", "${tasks.count { it.status == 0 }} open")
+        ScreenHeader("Tasks", "${tasks.count { it.status == 0 }} open") {
+            Box {
+                TextButton(onClick = { tplMenu = true }) { Text("Templates") }
+                DropdownMenu(expanded = tplMenu, onDismissRequest = { tplMenu = false }) {
+                    for (tpl in Templates) {
+                        DropdownMenuItem(
+                            text = { Text(tpl.emoji + " " + tpl.name) },
+                            onClick = {
+                                tplMenu = false
+                                Store.addTemplate(tpl, todayStr())
+                                filter = 1
+                            }
+                        )
+                    }
+                }
+            }
+        }
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -133,6 +150,14 @@ fun TasksScreen(actions: TaskActions) {
             }
             TextButton(onClick = { for (t in tasks) expanded[t.id] = true }) { Text("Expand all", fontSize = 12.sp) }
             TextButton(onClick = { expanded.clear() }) { Text("Collapse all", fontSize = 12.sp) }
+        }
+        if (filter == 0 && query.isBlank()) {
+            Text(
+                "📥 Inbox holds tasks with no date yet. Jot ideas down now, then give them a date when you are ready.",
+                fontSize = 12.sp,
+                color = muted,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+            )
         }
         if (rows.isEmpty()) {
             EmptyState(
@@ -185,7 +210,7 @@ fun TaskRow(task: Task, depth: Int, expanded: Boolean, actions: TaskActions, onE
             Spacer(Modifier.width(10.dp))
             Column(modifier = Modifier.weight(1f).clickable { actions.edit(task) }) {
                 Text(
-                    task.title,
+                    titleWithEmoji(task),
                     fontWeight = FontWeight.Medium,
                     textDecoration = if (done) TextDecoration.LineThrough else null,
                     color = if (done || task.status == 2) muted else Color.Unspecified,
@@ -200,6 +225,7 @@ fun TaskRow(task: Task, depth: Int, expanded: Boolean, actions: TaskActions, onE
                     )
                 }
                 if (task.status == 2) Text("Skipped", fontSize = 12.sp, color = muted)
+                if (task.notes.isNotBlank()) Text(task.notes, fontSize = 12.sp, color = muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 MetaRow(task)
             }
             Box {

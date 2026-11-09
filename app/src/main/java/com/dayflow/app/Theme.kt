@@ -6,10 +6,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Density
 import androidx.core.view.WindowCompat
 
 val Accents = listOf(
@@ -89,5 +92,13 @@ fun DayFlowTheme(content: @Composable () -> Unit) {
             c.isAppearanceLightNavigationBars = !dark
         }
     }
-    MaterialTheme(colorScheme = scheme, content = content)
+    val scale = when (Store.prefs.textScale) {
+        0 -> 0.9f
+        2 -> 1.15f
+        else -> 1f
+    }
+    val d = LocalDensity.current
+    CompositionLocalProvider(LocalDensity provides Density(d.density, d.fontScale * scale)) {
+        MaterialTheme(colorScheme = scheme, content = content)
+    }
 }

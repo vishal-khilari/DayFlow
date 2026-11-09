@@ -34,6 +34,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -47,6 +48,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -55,6 +57,27 @@ import java.time.LocalDate
 
 private val Letters = listOf("M", "T", "W", "T", "F", "S", "S")
 
+private val EmojiGroups = listOf(
+    "Body" to listOf("🏃", "🏋️", "🚴", "🏊", "🧘", "💧", "🥗", "🍎", "😴", "🚶", "🦷", "🧴"),
+    "Mind" to listOf("🧠", "📚", "📖", "✍️", "🎓", "💡", "🔬", "🧩", "♟️", "🗣️", "🔢", "🌍"),
+    "Creative" to listOf("🎨", "🖌️", "🎸", "🎹", "🎤", "🎬", "📷", "🧶", "✂️", "🎭", "🎻", "🥁"),
+    "Life" to listOf("💻", "🧹", "🛏️", "💰", "📞", "⏰", "🎯", "🌱", "🌞", "🙏", "❤️", "🐶")
+)
+
+private class QuickHabit(val name: String, val icon: String, val type: Int, val target: Int, val unit: String)
+
+private val QuickHabits = listOf(
+    QuickHabit("Drink water", "💧", 1, 8, "glasses"),
+    QuickHabit("Meditate", "🧘", 1, 10, "minutes"),
+    QuickHabit("Read", "📖", 1, 10, "pages"),
+    QuickHabit("Journal", "✍️", 0, 1, ""),
+    QuickHabit("Sketch or paint", "🎨", 1, 20, "minutes"),
+    QuickHabit("Practice music", "🎸", 1, 30, "minutes"),
+    QuickHabit("Think deeply", "🧠", 1, 15, "minutes"),
+    QuickHabit("Workout", "🏋️", 0, 1, ""),
+    QuickHabit("Sleep on time", "😴", 0, 1, "")
+)
+
 @Composable
 fun HabitsScreen() {
     val habits = Store.habits
@@ -62,13 +85,15 @@ fun HabitsScreen() {
     var creating by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<Habit?>(null) }
     var openId by remember { mutableStateOf<String?>(null) }
+    val done = habits.count { it.scheduledOn(LocalDate.now()) && it.doneOn(LocalDate.now()) }
+    val sched = habits.count { it.scheduledOn(LocalDate.now()) }
 
     Column(modifier = Modifier.fillMaxSize()) {
-        ScreenHeader("Habits", "Small steps, every day") {
+        ScreenHeader("Habits", if (sched == 0) "Small steps, every day" else "$done of $sched done today") {
             IconButton(onClick = { creating = true }) { Icon(Icons.Default.Add, contentDescription = "Add habit") }
         }
         if (habits.isEmpty()) {
-            EmptyState("🌱", "No habits yet. Tap + to create one, for example drinking water or reading.")
+            EmptyState("🌱", "No habits yet. Tap + to create one, for example drinking water, meditating or sketching.")
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -122,19 +147,25 @@ private fun HabitCard(h: Habit, open: Boolean, onToggleOpen: () -> Unit, onEdit:
     var menu by remember { mutableStateOf(false) }
     val now = LocalDate.now()
     val week = h.rate(7)
+    val rt = h.remindTime
+    val letters = Letters
 
     DfCard(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(h.icon, fontSize = 26.sp)
-                Spacer(Modifier.width(10.dp))
+                Box(
+                    modifier = Modifier.size(46.dp).clip(RoundedCornerShape(14.dp)).background(primary.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) { Text(h.icon, fontSize = 24.sp) }
+                Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f).clickable { onToggleOpen() }) {
-                    Text(h.name, fontWeight = FontWeight.SemiBold)
+                    Text(h.name, fontWeight = FontWeight.SemiBold, maxLines = 1)
                     Text(
-                        "🔥 ${h.currentStreak()} day streak · " + (if (week == null) "no data yet" else "${Math.round(week * 100)}% this week"),
+                        "🔥 ${h.currentStreak()} · " + (if (week == null) "no data yet" else "${Math.round(week * 100)}% this week"),
                         fontSize = 12.sp,
                         color = muted
                     )
+                    if (rt != null) Text("🔔 " + fmtHHmm(rt), fontSize = 11.sp, color = muted)
                 }
                 HabitControl(h, now)
                 Box {
@@ -149,9 +180,8 @@ private fun HabitCard(h: Habit, open: Boolean, onToggleOpen: () -> Unit, onEdit:
                     }
                 }
             }
-            // week strip (tap a day to toggle yes/no habits)
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 for (k in 6 downTo 0) {
@@ -168,10 +198,10 @@ private fun HabitCard(h: Habit, open: Boolean, onToggleOpen: () -> Unit, onEdit:
                         else -> RedC.copy(alpha = 0.35f)
                     }
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(Letters[d.dayOfWeek.value - 1], fontSize = 11.sp, color = muted)
+                        Text(letters[d.dayOfWeek.value - 1], fontSize = 11.sp, color = muted)
                         Box(
                             modifier = Modifier
-                                .size(28.dp)
+                                .size(30.dp)
                                 .clip(CircleShape)
                                 .background(color)
                                 .clickable(enabled = sched && h.type == 0 && !skipped) {
@@ -185,7 +215,7 @@ private fun HabitCard(h: Habit, open: Boolean, onToggleOpen: () -> Unit, onEdit:
                 }
             }
             if (open) {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(14.dp))
                 Text("Last 4 weeks", fontSize = 12.sp, color = muted)
                 Spacer(Modifier.height(6.dp))
                 val start = now.minusDays(27)
@@ -201,12 +231,7 @@ private fun HabitCard(h: Habit, open: Boolean, onToggleOpen: () -> Unit, onEdit:
                                 d == now -> MaterialTheme.colorScheme.surfaceVariant
                                 else -> RedC.copy(alpha = 0.25f)
                             }
-                            Box(
-                                modifier = Modifier
-                                    .size(18.dp)
-                                    .clip(RoundedCornerShape(4.dp))
-                                    .background(c)
-                            )
+                            Box(modifier = Modifier.size(20.dp).clip(RoundedCornerShape(5.dp)).background(c))
                         }
                     }
                 }
@@ -222,15 +247,43 @@ private fun HabitCard(h: Habit, open: Boolean, onToggleOpen: () -> Unit, onEdit:
 }
 
 @Composable
+private fun EmojiPicker(selected: String, onSelect: (String) -> Unit) {
+    val primary = MaterialTheme.colorScheme.primary
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (group in EmojiGroups) {
+            Text(group.first, fontSize = 11.sp, color = muted, modifier = Modifier.padding(top = 4.dp))
+            for (rowItems in group.second.chunked(6)) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    for (e in rowItems) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(42.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (e == selected) primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                .clickable { onSelect(e) },
+                            contentAlignment = Alignment.Center
+                        ) { Text(e, fontSize = 22.sp) }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun HabitDialog(initial: Habit?, onClose: () -> Unit) {
+    val ctx = LocalContext.current
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var icon by remember { mutableStateOf(initial?.icon ?: "✅") }
     var type by remember { mutableIntStateOf(initial?.type ?: 0) }
     var target by remember { mutableStateOf((initial?.target ?: 1).toString()) }
     var unit by remember { mutableStateOf(initial?.unit ?: "") }
     var days by remember { mutableStateOf(initial?.days ?: listOf(1, 2, 3, 4, 5, 6, 7)) }
+    var remindTime by remember { mutableStateOf(initial?.remindTime) }
+    var custom by remember { mutableStateOf("") }
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val icons = listOf("✅", "🏃", "💧", "📚", "💻", "😴", "🥗", "🧘", "✍️", "🎸")
     val dayNames = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
     AlertDialog(
@@ -241,6 +294,24 @@ private fun HabitDialog(initial: Habit?, onClose: () -> Unit) {
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                if (initial == null) {
+                    Text("Quick ideas", fontSize = 12.sp, color = muted)
+                    Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (q in QuickHabits) {
+                            FilterChip(
+                                selected = false,
+                                onClick = {
+                                    name = q.name
+                                    icon = q.icon
+                                    type = q.type
+                                    target = q.target.toString()
+                                    unit = q.unit
+                                },
+                                label = { Text(q.icon + " " + q.name) }
+                            )
+                        }
+                    }
+                }
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -248,12 +319,22 @@ private fun HabitDialog(initial: Habit?, onClose: () -> Unit) {
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                Text("Icon", fontSize = 12.sp, color = muted)
-                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (ic in icons) {
-                        FilterChip(selected = icon == ic, onClick = { icon = ic }, label = { Text(ic) })
-                    }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Icon:", fontSize = 12.sp, color = muted)
+                    Spacer(Modifier.width(8.dp))
+                    Text(icon, fontSize = 28.sp)
                 }
+                EmojiPicker(selected = icon, onSelect = { icon = it })
+                OutlinedTextField(
+                    value = custom,
+                    onValueChange = {
+                        custom = it.take(4)
+                        if (custom.isNotBlank()) icon = custom.trim()
+                    },
+                    label = { Text("Or type any emoji from your keyboard") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
                 Text("Type", fontSize = 12.sp, color = muted)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FilterChip(selected = type == 0, onClick = { type = 0 }, label = { Text("Yes / No") })
@@ -286,6 +367,13 @@ private fun HabitDialog(initial: Habit?, onClose: () -> Unit) {
                         )
                     }
                 }
+                Text("Daily reminder", fontSize = 12.sp, color = muted)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(onClick = { showTimePicker(ctx, remindTime ?: "08:00") { remindTime = it } }) {
+                        Text(if (remindTime != null) "🔔 " + fmtHHmm(remindTime ?: "") else "Set reminder time")
+                    }
+                    if (remindTime != null) TextButton(onClick = { remindTime = null }) { Text("Clear") }
+                }
             }
         },
         confirmButton = {
@@ -294,9 +382,16 @@ private fun HabitDialog(initial: Habit?, onClose: () -> Unit) {
                 onClick = {
                     val tg = if (type == 0) 1 else maxOf(1, target.toIntOrNull() ?: 1)
                     if (initial == null) {
-                        Store.addHabit(Habit(id = Store.newId(), name = name.trim(), icon = icon, type = type, target = tg, unit = unit.trim(), days = days))
+                        Store.addHabit(
+                            Habit(
+                                id = Store.newId(), name = name.trim(), icon = icon, type = type, target = tg,
+                                unit = unit.trim(), days = days, remindTime = remindTime
+                            )
+                        )
                     } else {
-                        Store.updateHabit(initial.copy(name = name.trim(), icon = icon, type = type, target = tg, unit = unit.trim(), days = days))
+                        Store.updateHabit(
+                            initial.copy(name = name.trim(), icon = icon, type = type, target = tg, unit = unit.trim(), days = days, remindTime = remindTime)
+                        )
                     }
                     onClose()
                 }

@@ -4,6 +4,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
 
     <application
         android:allowBackup="true"
@@ -25,13 +27,25 @@
         <receiver
             android:name=".DayFlowWidgetReceiver"
             android:exported="true"
-            android:label="DayFlow">
+            android:label="DayFlow Today">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/dayflow_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".HabitsWidgetReceiver"
+            android:exported="true"
+            android:label="DayFlow Habits">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/dayflow_habits_widget_info" />
         </receiver>
 
         <receiver

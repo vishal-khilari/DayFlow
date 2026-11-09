@@ -25,6 +25,8 @@ object Store {
         private set
     var prefs by mutableStateOf(Prefs())
         private set
+    var reviews by mutableStateOf(listOf<Review>())
+        private set
 
     private var appCtx: Context? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -52,6 +54,7 @@ object Store {
         tasks = readList(p.getString("tasks", null)) { taskFromJson(it) }
         habits = readList(p.getString("habits", null)) { habitFromJson(it) }
         sessions = readList(p.getString("sessions", null)) { sessionFromJson(it) }
+        reviews = readList(p.getString("reviews", null)) { reviewFromJson(it) }
         val ps = p.getString("prefs", null)
         prefs = try {
             if (ps == null) Prefs() else prefsFromJson(JSONObject(ps))
@@ -65,6 +68,7 @@ object Store {
         scope.launch {
             try {
                 DayFlowWidget().updateAll(c)
+                HabitsWidget().updateAll(c)
             } catch (e: Exception) {
                 // widget not placed yet - nothing to do
             }
@@ -89,10 +93,23 @@ object Store {
         refreshWidgets()
     }
 
+    private fun saveReviews(list: List<Review>) {
+        reviews = list
+        sp().edit().putString("reviews", JSONArray(list.map { reviewToJson(it) }).toString()).apply()
+    }
+
+    fun addReview(r: Review) = saveReviews(reviews.filter { it.date != r.date } + r)
+
     fun updatePrefs(p: Prefs) {
+        val old = prefs
         prefs = p
         sp().edit().putString("prefs", prefsToJson(p).toString()).apply()
         refreshWidgets()
+        if (old.morningOn != p.morningOn || old.morningTime != p.morningTime ||
+            old.eveningOn != p.eveningOn || old.eveningTime != p.eveningTime
+        ) {
+            appCtx?.let { Reminders.scheduleDaily(it) }
+        }
     }
 
     // ---------- tasks ----------
@@ -190,7 +207,7 @@ object Store {
 
     fun rolloverOverdue() {
         val td = todayStr()
-        val updated = tasks.map { if (it.isOverdue()) it.copy(due = td) else it }
+        val updated = tasks.map { if (it.isOverdue()) it.copy(due = td, remindAt = 0L) else it }
         saveTasks(updated)
         appCtx?.let { c -> updated.forEach { Reminders.schedule(c, it) } }
     }
@@ -206,11 +223,27 @@ object Store {
 
     // ---------- habits ----------
 
-    fun addHabit(h: Habit) = saveHabits(habits + h)
+    fun addHabit(h: Habit) {
+        saveHabits(habits + h)
+        appCtx?.let { Reminders.scheduleHabit(it, h) }
+    }
 
-    fun updateHabit(h: Habit) = saveHabits(habits.map { if (it.id == h.id) h.copy(entries = it.entries, skipped = it.skipped) else it })
+    fun updateHabit(h: Habit) {
+        val old = habits.firstOrNull { it.id == h.id }
+        val merged = if (old != null) h.copy(entries = old.entries, skipped = old.skipped) else h
+        saveHabits(habits.map { if (it.id == h.id) merged else it })
+        appCtx?.let { Reminders.scheduleHabit(it, merged) }
+    }
 
-    fun deleteHabit(id: String) = saveHabits(habits.filter { it.id != id })
+    fun deleteHabit(id: String) {
+        appCtx?.let { Reminders.cancelHabit(it, id) }
+        saveHabits(habits.filter { it.id != id })
+    }
+
+    fun completeHabitToday(id: String) {
+        val h = habits.firstOrNull { it.id == id } ?: return
+        setHabitEntry(id, todayStr(), h.target)
+    }
 
     fun setHabitEntry(id: String, date: String, value: Int) {
         saveHabits(habits.map {
@@ -387,6 +420,7 @@ object Store {
         o.put("tasks", JSONArray(tasks.map { taskToJson(it) }))
         o.put("habits", JSONArray(habits.map { habitToJson(it) }))
         o.put("sessions", JSONArray(sessions.map { sessionToJson(it) }))
+        o.put("reviews", JSONArray(reviews.map { reviewToJson(it) }))
         o.put("prefs", prefsToJson(prefs))
         return o.toString(2)
     }
@@ -402,8 +436,10 @@ object Store {
             saveTasks(t)
             saveHabits(h)
             saveSessions(s)
+            val rv = o.optJSONArray("reviews")
+            saveReviews(if (rv == null) emptyList() else readList(rv.toString()) { reviewFromJson(it) })
             updatePrefs(p)
-            appCtx?.let { c -> t.forEach { Reminders.schedule(c, it) } }
+            appCtx?.let { c -> Reminders.scheduleAll(c) }
             return true
         } catch (e: Exception) {
             return false
@@ -411,10 +447,14 @@ object Store {
     }
 
     fun clearAll() {
-        appCtx?.let { c -> tasks.forEach { Reminders.cancel(c, it.id) } }
+        appCtx?.let { c ->
+            tasks.forEach { Reminders.cancel(c, it.id) }
+            habits.forEach { Reminders.cancelHabit(c, it.id) }
+        }
         saveTasks(emptyList())
         saveHabits(emptyList())
         saveSessions(emptyList())
+        saveReviews(emptyList())
     }
 
     fun loadSample() {
@@ -465,5 +505,77 @@ object Store {
             entries = mapOf(td.minusDays(1).toString() to 10, td.minusDays(2).toString() to 12),
             startDate = td.minusDays(14).toString())
         saveHabits(habits + listOf(water, run, read))
+    }
+
+    // ---------- planning, templates, review ----------
+
+    /** Finds free time for today's (or another day's) tasks that have no time yet. Returns (placed, notFitting). Nothing is saved. */
+    fun planDay(dateStr: String): Pair<List<Pair<Task, Int>>, List<Task>> {
+        val isToday = dateStr == todayStr()
+        val nowMin = java.time.LocalTime.now().let { it.hour * 60 + it.minute }
+        val startDay = if (isToday) max(prefs.dayStart * 60, ((nowMin + 14) / 15) * 15) else prefs.dayStart * 60
+        val endDay = prefs.dayEnd * 60
+        val dayTasks = tasks.filter { it.status == 0 && it.due == dateStr }
+        val intervals = mutableListOf<Pair<Int, Int>>()
+        for (t in dayTasks) {
+            val s = startMinutes(t)
+            if (s != null) intervals.add(Pair(s, s + max(t.durationMin, 15)))
+        }
+        val todo = dayTasks.filter { it.time == null }.sortedWith(compareBy<Task>({ -it.priority }, { it.order }))
+        val placed = mutableListOf<Pair<Task, Int>>()
+        val missed = mutableListOf<Task>()
+        for (t in todo) {
+            val dur = if (t.durationMin > 0) t.durationMin else if (prefs.defaultDuration > 0) prefs.defaultDuration else 30
+            var c = startDay
+            var slot = -1
+            for (iv in intervals.sortedBy { it.first }) {
+                if (iv.first - c >= dur) {
+                    slot = c
+                    break
+                }
+                c = max(c, iv.second + 5)
+            }
+            if (slot < 0 && endDay - c >= dur) slot = c
+            if (slot >= 0) {
+                placed.add(Pair(t, slot))
+                intervals.add(Pair(slot, slot + dur))
+            } else {
+                missed.add(t)
+            }
+        }
+        return Pair(placed.sortedBy { it.second }, missed)
+    }
+
+    fun applyPlan(plan: List<Pair<Task, Int>>) {
+        for (p in plan) {
+            val cur = tasks.firstOrNull { it.id == p.first.id } ?: continue
+            updateTask(cur.copy(time = toHHmm(p.second)))
+        }
+    }
+
+    fun addTemplate(t: Template, date: String?) {
+        var o = nextOrder()
+        val parent = Task(
+            id = newId(), title = t.emoji + " " + t.name, due = date,
+            durationMin = t.items.sumOf { it.second }, category = t.category, order = o
+        )
+        val kids = t.items.map { item ->
+            o += 1
+            Task(id = newId(), parentId = parent.id, title = item.first, due = date, durationMin = item.second, category = t.category, order = o)
+        }
+        saveTasks(tasks + parent + kids)
+    }
+
+    fun moveUnfinishedToTomorrow() {
+        val td = todayStr()
+        val tomorrow = LocalDate.now().plusDays(1).toString()
+        val updated = tasks.map {
+            val d = it.due
+            if (it.status == 0 && d != null && d <= td) {
+                it.copy(due = tomorrow, remindAt = if (it.remindAt > 0L) it.remindAt + 86_400_000L else 0L)
+            } else it
+        }
+        saveTasks(updated)
+        appCtx?.let { c -> updated.forEach { Reminders.schedule(c, it) } }
     }
 }

@@ -19,6 +19,7 @@ data class Task(
     val status: Int = 0,
     val doneOn: String? = null,
     val remind: Boolean = false,
+    val remindAt: Long = 0L,
     val category: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     val order: Long = 0L
@@ -35,7 +36,8 @@ data class Habit(
     val days: List<Int> = listOf(1, 2, 3, 4, 5, 6, 7),
     val entries: Map<String, Int> = emptyMap(),
     val skipped: Set<String> = emptySet(),
-    val startDate: String = LocalDate.now().toString()
+    val startDate: String = LocalDate.now().toString(),
+    val remindTime: String? = null
 )
 
 data class FocusSession(val date: String, val minutes: Int, val taskId: String?, val taskTitle: String)
@@ -47,13 +49,52 @@ data class Prefs(
     val focusMin: Int = 25,
     val breakMin: Int = 5,
     val longBreakMin: Int = 15,
+    val dayStart: Int = 7,
     val dayEnd: Int = 22,
     val snoozeMin: Int = 10,
     val hidden: Set<String> = emptySet(),
-    val dismissed: Set<String> = emptySet()
+    val dismissed: Set<String> = emptySet(),
+    val use24h: Boolean = false,
+    val weekStartMon: Boolean = true,
+    val defaultDuration: Int = 0,
+    val defaultPriority: Int = 1,
+    val defaultRemindMode: Int = 0,
+    val textScale: Int = 1,
+    val haptics: Boolean = true,
+    val startTab: Int = 0,
+    val widgetTheme: Int = 0,
+    val categories: List<String> = listOf("Study", "Work", "Health", "Personal", "Other"),
+    val morningOn: Boolean = false,
+    val morningTime: String = "08:00",
+    val eveningOn: Boolean = false,
+    val eveningTime: String = "21:00"
 )
 
 data class Rec(val id: String, val title: String, val detail: String, val action: String? = null)
+
+data class Review(val date: String, val mood: Int, val wins: String, val blockers: String, val tomorrow: String)
+
+data class Template(val name: String, val emoji: String, val category: String, val items: List<Pair<String, Int>>)
+
+val Templates = listOf(
+    Template("Morning routine", "🌅", "Personal", listOf("Drink water" to 5, "Stretch" to 10, "Plan the day" to 10, "Healthy breakfast" to 20)),
+    Template("Evening routine", "🌙", "Personal", listOf("Tidy up" to 10, "Pack tomorrow's bag" to 10, "Review the day" to 10, "Wind down, no screens" to 30)),
+    Template("Study session", "📚", "Study", listOf("Review notes" to 20, "Learn a new topic" to 45, "Practice problems" to 30, "Summarise what I learned" to 10)),
+    Template("Gym session", "💪", "Health", listOf("Warm-up" to 10, "Main workout" to 40, "Cool-down and stretch" to 10)),
+    Template("Weekly planning", "🗓️", "Work", listOf("Review last week" to 15, "Pick the top 3 goals" to 10, "Schedule key tasks" to 20)),
+    Template("Job application", "💼", "Work", listOf("Tailor my CV" to 30, "Write the cover letter" to 30, "Submit the application" to 10, "Follow up after a week" to 5)),
+    Template("Exam preparation", "🎓", "Study", listOf("Collect the syllabus" to 15, "Make a revision plan" to 20, "Revise topic 1" to 60, "Revise topic 2" to 60, "Mock test" to 90))
+)
+
+fun categoryEmoji(c: String): String = when (c) {
+    "Study" -> "📚"
+    "Work" -> "💼"
+    "Health" -> "💪"
+    "Personal" -> "🏡"
+    "Other" -> "📌"
+    "" -> ""
+    else -> "🏷️"
+}
 
 // ---------- date helpers ----------
 
@@ -79,7 +120,32 @@ fun fmtMin(m: Int): String {
 
 fun fmtClock(minutes: Int): String {
     val mm = ((minutes % 1440) + 1440) % 1440
-    return "%02d:%02d".format(mm / 60, mm % 60)
+    val h = mm / 60
+    val m = mm % 60
+    return if (Store.prefs.use24h) {
+        "%02d:%02d".format(h, m)
+    } else {
+        val h12 = if (h % 12 == 0) 12 else h % 12
+        "%d:%02d %s".format(h12, m, if (h < 12) "AM" else "PM")
+    }
+}
+
+/** Turns a stored "HH:mm" (24h) string into the user's chosen display format. */
+fun fmtHHmm(s: String): String {
+    val p = s.split(":")
+    val h = p.getOrNull(0)?.toIntOrNull() ?: return s
+    val m = p.getOrNull(1)?.toIntOrNull() ?: return s
+    return fmtClock(h * 60 + m)
+}
+
+fun toHHmm(minutes: Int): String = "%02d:%02d".format(minutes / 60, minutes % 60)
+
+fun parseTime(s: String?): java.time.LocalTime {
+    return try {
+        java.time.LocalTime.parse(s ?: "09:00")
+    } catch (e: Exception) {
+        java.time.LocalTime.of(9, 0)
+    }
 }
 
 fun startMinutes(t: Task): Int? {
@@ -194,6 +260,7 @@ fun taskToJson(t: Task): JSONObject {
     o.put("status", t.status)
     o.put("doneOn", t.doneOn ?: JSONObject.NULL)
     o.put("remind", t.remind)
+    o.put("remindAt", t.remindAt)
     o.put("category", t.category)
     o.put("createdAt", t.createdAt)
     o.put("order", t.order)
@@ -212,6 +279,7 @@ fun taskFromJson(o: JSONObject): Task = Task(
     status = o.optInt("status", 0),
     doneOn = o.optS("doneOn"),
     remind = o.optBoolean("remind", false),
+    remindAt = o.optLong("remindAt", 0L),
     category = o.optString("category", ""),
     createdAt = o.optLong("createdAt", 0L),
     order = o.optLong("order", 0L)
@@ -227,6 +295,7 @@ fun habitToJson(h: Habit): JSONObject {
     o.put("unit", h.unit)
     o.put("days", JSONArray(h.days))
     o.put("startDate", h.startDate)
+    o.put("remindTime", h.remindTime ?: JSONObject.NULL)
     val e = JSONObject()
     for ((k, v) in h.entries) e.put(k, v)
     o.put("entries", e)
@@ -252,7 +321,8 @@ fun habitFromJson(o: JSONObject): Habit {
         days = days,
         entries = map,
         skipped = skipped.toSet(),
-        startDate = o.optString("startDate", LocalDate.now().toString())
+        startDate = o.optString("startDate", LocalDate.now().toString()),
+        remindTime = o.optS("remindTime")
     )
 }
 
@@ -280,22 +350,74 @@ fun prefsToJson(p: Prefs): JSONObject {
     o.put("focusMin", p.focusMin)
     o.put("breakMin", p.breakMin)
     o.put("longBreakMin", p.longBreakMin)
+    o.put("dayStart", p.dayStart)
     o.put("dayEnd", p.dayEnd)
     o.put("snoozeMin", p.snoozeMin)
     o.put("hidden", JSONArray(p.hidden.toList()))
     o.put("dismissed", JSONArray(p.dismissed.toList()))
+    o.put("use24h", p.use24h)
+    o.put("weekStartMon", p.weekStartMon)
+    o.put("defaultDuration", p.defaultDuration)
+    o.put("defaultPriority", p.defaultPriority)
+    o.put("defaultRemindMode", p.defaultRemindMode)
+    o.put("textScale", p.textScale)
+    o.put("haptics", p.haptics)
+    o.put("startTab", p.startTab)
+    o.put("widgetTheme", p.widgetTheme)
+    o.put("categories", JSONArray(p.categories))
+    o.put("morningOn", p.morningOn)
+    o.put("morningTime", p.morningTime)
+    o.put("eveningOn", p.eveningOn)
+    o.put("eveningTime", p.eveningTime)
     return o
 }
 
-fun prefsFromJson(o: JSONObject): Prefs = Prefs(
-    name = o.optString("name", ""),
-    themeMode = o.optInt("themeMode", 0),
-    accent = o.optInt("accent", 0),
-    focusMin = o.optInt("focusMin", 25),
-    breakMin = o.optInt("breakMin", 5),
-    longBreakMin = o.optInt("longBreakMin", 15),
-    dayEnd = o.optInt("dayEnd", 22),
-    snoozeMin = o.optInt("snoozeMin", 10),
-    hidden = (o.optJSONArray("hidden")?.strings() ?: emptyList()).toSet(),
-    dismissed = (o.optJSONArray("dismissed")?.strings() ?: emptyList()).toSet()
+fun prefsFromJson(o: JSONObject): Prefs {
+    val d = Prefs()
+    val cats = o.optJSONArray("categories")?.strings() ?: d.categories
+    return Prefs(
+        name = o.optString("name", ""),
+        themeMode = o.optInt("themeMode", 0),
+        accent = o.optInt("accent", 0),
+        focusMin = o.optInt("focusMin", 25),
+        breakMin = o.optInt("breakMin", 5),
+        longBreakMin = o.optInt("longBreakMin", 15),
+        dayStart = o.optInt("dayStart", 7),
+        dayEnd = o.optInt("dayEnd", 22),
+        snoozeMin = o.optInt("snoozeMin", 10),
+        hidden = (o.optJSONArray("hidden")?.strings() ?: emptyList()).toSet(),
+        dismissed = (o.optJSONArray("dismissed")?.strings() ?: emptyList()).toSet(),
+        use24h = o.optBoolean("use24h", false),
+        weekStartMon = o.optBoolean("weekStartMon", true),
+        defaultDuration = o.optInt("defaultDuration", 0),
+        defaultPriority = o.optInt("defaultPriority", 1),
+        defaultRemindMode = o.optInt("defaultRemindMode", 0),
+        textScale = o.optInt("textScale", 1),
+        haptics = o.optBoolean("haptics", true),
+        startTab = o.optInt("startTab", 0),
+        widgetTheme = o.optInt("widgetTheme", 0),
+        categories = cats,
+        morningOn = o.optBoolean("morningOn", false),
+        morningTime = o.optString("morningTime", "08:00"),
+        eveningOn = o.optBoolean("eveningOn", false),
+        eveningTime = o.optString("eveningTime", "21:00")
+    )
+}
+
+fun reviewToJson(r: Review): JSONObject {
+    val o = JSONObject()
+    o.put("date", r.date)
+    o.put("mood", r.mood)
+    o.put("wins", r.wins)
+    o.put("blockers", r.blockers)
+    o.put("tomorrow", r.tomorrow)
+    return o
+}
+
+fun reviewFromJson(o: JSONObject): Review = Review(
+    date = o.getString("date"),
+    mood = o.optInt("mood", 2),
+    wins = o.optString("wins", ""),
+    blockers = o.optString("blockers", ""),
+    tomorrow = o.optString("tomorrow", "")
 )
